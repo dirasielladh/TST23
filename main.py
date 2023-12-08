@@ -177,8 +177,21 @@ def send_email():
         print(e)
         return({"message": str(e)})
 
-# User Authentication using Sign Up API
+# Melakukan update user
+@app.route("/users/<int:id_user>", methods=['PUT'])
+def get_user(id_user):
+    try: 
+        cur = db.cursor()
+        data = request.json
+        cur.execute(f'''
+                    UPDATE data_user 
+                    SET email = %s, password = %s, no_pol = %s, count_violations = %i
+                    ''')
+    except Exception as e:
+        print(e)
+        return({"message": str(e)})
 
+# User Authentication using Sign Up API
 def hash_password(password):
     sha256 = hashlib.sha256()
     sha256.update(password.encode())
