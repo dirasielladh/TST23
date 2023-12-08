@@ -23,15 +23,31 @@ mail = Mail(app)
 skey= pyotp.random_base32()
 totp = pyotp.TOTP(skey,interval=750)
 
-
-
-# Mendapatkan record berdasarkan parameter yang diinginkan
-@app.route("/users", methods=['GET'])
-def users():
+# Mendapatkan record all pelanggaran
+@app.route("/violation", methods=['GET'])
+def violation():
     cur = db.cursor()
     id_user = request.args.get("id_user")
     cur.execute(f'''
-                SELECT * FROM pelanggar WHERE email = '{id_user}'; 
+                SELECT * FROM pelanggaran'; 
+                ''')
+    columns = cur.descriptions()
+    data = cur.fetchall()
+    result = []
+    for value in data:
+        tmp ={}
+        for (index,column) in enumerate(value):
+            tmp[columns[index][0]] = column
+            result.append(tmp)
+    return jsonify(result)
+
+# Mendapatkan data pelanggar
+@app.route("/violation", methods=['GET'])
+def user_search():
+    cur = db.cursor()
+    id_user = request.args.get("id_user")
+    cur.execute(f'''
+                SELECT * FROM pelanggaran WHERE id_user = '{id_user}'; 
                 ''')
     columns = cur.descriptions()
     data = cur.fetchall()
@@ -65,8 +81,28 @@ def add_violation():
         return({"message": str(e)})
     return jsonify({"message": f"Success adding new violation record with id: {id_violation}"})
 
+# Melakukan proses pembayaran
+@app.route("/payments", methods=['POST'])
+def process_payment():
+    try: 
+        cur = db.cursor()
+        data = request.json
+        id_violation = data["id_violation"]
+        id_user = data["id_user"]
+        amount = data["amount"]
+        payment_type = data["payment_type"]
+        payment_detail = data["payment_detail"]
+        cur.execute(f'''
+                INSERT INTO payments
+                (id_violation,id_user, payment_type, payment_detail)
+                VALUES ({id_violation},{id_user},'{amount}',{payment_type},{payment_detail});
+                ''')
+    except Exception as e:
+        print(e)
+        return({"message": str(e)})
+    return jsonify({"message": f"Payment successful!"})
 
-# Mengupdate handling status violation record
+# Mengupdate status 
 @app.route("/status", methods=['PUT'])
 def edit_violation():
     try: 
@@ -103,27 +139,19 @@ def edit_violation():
     return jsonify({"message": f"Succesfully updated record violation on {date},{time}and violation id : {id_violation}"})
 
 # Mengirimkan notifikasi
-@app.route("/send-email", methods=['POST'])
+@app.route("/notification", methods=['POST'])
 def send_email():
     try: 
         cur = db.cursor()
         data = request.json
         email = data["email"]
-        violation_code = data["violation_charged_Code"]
-        year = data["violation_year"]
-        month = data["violation_month"]
-        day_of_week = data["violation_day_of_week"]
-        location = data["state_of_license"]
-        report = data["police_agency"]
+        date = data["date"]
+        time = data["time"]
         cur.execute(f'''
-                    SELECT handling_status FROM pelanggar_traffic_empat_tahun 
+                    SELECT status FROM pelanggaran
                     WHERE email = '{email}'
-                    AND violation_charged_Code = {violation_code}
-                    AND violation_year= {year}
-                    AND violation_month = {month}
-                    AND violation_day_of_week = '{day_of_week}'
-                    AND state_of_license = '{location}'
-                    AND police_agency = '{report}';;
+                    AND date = {date}
+                    AND time= {time}
                     ''')
         check_data = cur.fetchall()
         if len(check_data) == "NOTPAID":
@@ -135,12 +163,12 @@ def send_email():
             msg.body = f'''
             Halo '{email}'!
             Telah tertulis bahwa Anda melakukan pelanggaran lalu lintas dengan keterangan :
-            Tanggal : '{day_of_week}'/{month}/{year}
-            Tipe Pelanggaran : {violation_code}
-            Silahkan melakukan penanganan terhadap pelanggaran Anda ke kantor polici '{report}'.
+            Tanggal : {date},{time}
+            Tipe Pelanggaran : {type}
+            Silahkan melakukan penanganan terhadap pelanggaran Anda ke kantor polisi.
             Terima kasih.'''
             mail.send(msg)
-            return jsonify({"message" : "Email have been sent to trafic violator."})
+            return jsonify({"message" : "Email have been sent!"})
         else :
             raise Exception(
 				f'Violation case has been handled.'
@@ -163,18 +191,16 @@ def signup():
         cur = db.cursor()
         data = request.json
         email = data["email"]
-        username = data["username"]
         password = data["password"]
         cur.execute(f'''
                     SELECT * from data_user 
-                    WHERE email = '{email}'
-                    OR username = '{username}';
+                    WHERE email = '{email}';
                 ''')
         check_data = cur.fetchall()
         if len(check_data) == 1:
             cur.execute(f'''
                         INSERT INTO data_user(email,username,password)
-                		VALUES ('{email}','{username}','{hash_password(password)}');
+                		VALUES ('{email}','{hash_password(password)}');
                         ''')
             db.commit()
         else: 
@@ -195,11 +221,11 @@ def signin():
     try: 
         cur = db.cursor()
         data = request.json
-        username = data["username"]
+        email = data["email"]
         password = data["password"]
         cur.execute(f'''
-                    SELECT * from data_user 
-                    WHERE username = '{username}';
+                    SELECT * from data_user
+                    WHERE email = '{email}';
                 ''')
         columns = cur.description
         data = cur.fetchall()
@@ -218,11 +244,11 @@ def signin():
                 return jsonify({"token": token})
             else: 
                 raise Exception(
-					f'Wrong username or password. Please input right username or password.'
+					f'Wrong email or password. Please input right email or password.'
 				)
         else: 
             raise Exception(
-				f'Wrong username or password. Please input right username or password.'
+				f'Wrong email or password. Please input right email or password.'
 			)
     except Exception as e:
         print(e)
@@ -266,11 +292,11 @@ def signin_otp():
     try: 
         cur = db.cursor()
         data = request.json
-        username = data["username"]
+        email = data["email"]
         password = data["password"]
         cur.execute(f'''
                     SELECT * from data_user 
-                    WHERE username = '{username}';
+                    WHERE email = '{email}';
                 ''')
         columns = cur.description
         data = cur.fetchall()
@@ -292,11 +318,11 @@ def signin_otp():
                 return jsonify({"message": "Silahkan memasukkan OTP yang telah dikirim"})
             else : 
                 raise Exception(
-					f'Wrong username or password! Please try again.'
+					f'Wrong email or password! Please try again.'
 				)
         else: 
             raise Exception(
-				f'Wrong username or password! Please try again.'
+				f'Wrong email or password! Please try again.'
 			)
     except Exception as e:
         print(e)
@@ -307,11 +333,11 @@ def signin_otp():
 def verify_otp(): 
     cur = db.cursor()
     data = request.json
-    username = data["username"]
+    email = data["email"]
     otp = data["otp"]
     cur.execute(f'''
                 SELECT * from data_user 
-                WHERE username = '{username}';
+                WHERE username = '{email}';
                 ''')
     columns = cur.description
     data = cur.fetchall()
